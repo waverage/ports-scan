@@ -14,7 +14,7 @@ import (
 var mongo = db.Db{}
 
 func main() {
-	gen, err := ipslist.Generator(1, 1, 1, 1)
+	gen, err := ipslist.Generator(0, 0, 0, 0)
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -29,7 +29,7 @@ func main() {
 	fmt.Println("Database connected!")
 
 	count := 0
-	limit := limiter.NewConcurrencyLimiter(2000)
+	limit := limiter.NewConcurrencyLimiter(800)
 
 	for ;; {
 		ip, err := gen.Next()
@@ -42,7 +42,7 @@ func main() {
 		})
 
 		if count % 1000000 == 0 {
-			fmt.Println("Processed ", count, ", IP: ", ip)
+			fmt.Println("--------------Processed ", count, ", IP: ", ip)
 		}
 		count++
 	}
