@@ -7,49 +7,71 @@ import (
 	"net"
 	"port/db"
 	"port/ipslist"
-	"port/limiter"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
-var mongo = db.Db{}
+
+var counter uint64
+var wg sync.WaitGroup
+var mg = db.Db{}
 
 func main() {
-	gen, err := ipslist.Generator(0, 0, 0, 0)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
+	//var startIp = net.IPv4(18, 87, 91, 16)
 
-	err = mongo.Connect()
+	err := mg.Connect()
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer mongo.Disconnect()
+	defer mg.Disconnect()
 
 	fmt.Println("Database connected!")
 
-	count := 0
-	limit := limiter.NewConcurrencyLimiter(800)
+	totalIps := 255 * 255 * 255 * 255
+	totalWorkers := 16
+	ipsPerWorker := uint(totalIps / totalWorkers)
 
-	for ;; {
-		ip, err := gen.Next()
-		if err != nil {
-			break
+	log.Println("total ips: ", totalIps)
+	log.Println("Ips per worker: ", ipsPerWorker)
+	ip := net.IPv4(0, 0, 0, 0)
+
+
+	for i := 0; i <= totalWorkers; i++ {
+		wg.Add(1)
+
+		if i == totalWorkers {
+			ip = net.IPv4(255, 255, 255, 255)
 		}
+		//if i % 1000 == 0 {
+			log.Println("Start ip: ", ip.String())
+		//}
+		go initWorker(ip, ipsPerWorker)
 
-		limit.Execute(func() {
-			processPort(ip, "80")
-		})
-
-		if count % 1000000 == 0 {
-			fmt.Println("--------------Processed ", count, ", IP: ", ip)
-		}
-		count++
+		ip = ipslist.IpIncrement(ip, ipsPerWorker)
 	}
 
-	limit.Wait()
+	wg.Wait()
 
-	fmt.Printf("Total count: %d\n", count)
+	log.Println("Start ip: ", ip.String())
+	log.Println("Workers has been initialized")
+}
+
+func initWorker(ip net.IP, count uint) {
+	defer wg.Done()
+
+	for i := uint(0); i < count; i++ {
+		processPort(ip.String(), "80")
+		atomic.AddUint64(&counter, 1)
+
+		ip = ipslist.IpIncrement(ip, 1)
+
+		if counter % 100000 == 0 {
+			log.Println("Processed ", counter / 1000000, "mln ips")
+		}
+	}
+
+	log.Println("Group finished, end:", ip.String())
 }
 
 func processPort(host, port string) {
@@ -57,12 +79,13 @@ func processPort(host, port string) {
 
 	if err != nil {
 		if err.Error() != fmt.Sprintf("dial tcp %v:%v: i/o timeout", host, port) &&
-		   err.Error() != fmt.Sprintf("dial tcp %v:%v: connect: connection refused", host, port) {
+			err.Error() != fmt.Sprintf("dial tcp %v:%v: connect: network is unreachable", host, port) &&
+			err.Error() != fmt.Sprintf("dial tcp %v:%v: connect: no route to host", host, port) &&
+		    err.Error() != fmt.Sprintf("dial tcp %v:%v: connect: connection refused", host, port) {
 			log.Println(host, ":", port, "Received error: ", err)
 		}
 	} else {
-		log.Println(host + ":" + port + " opened")
-		mongo.InsertRow(host, port)
+		mg.InsertRow(host, port)
 	}
 }
 

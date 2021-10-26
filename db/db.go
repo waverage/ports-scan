@@ -17,7 +17,7 @@ type Db struct {
 }
 
 func (db *Db) Connect() error {
-	uri := "mongodb://127.0.0.1:27017/ips"
+	uri := "mongodb://127.0.0.1:27017"
 	var err error = nil
 	db.client, err = mongo.NewClient(options.Client().ApplyURI(uri))
 	if err != nil {

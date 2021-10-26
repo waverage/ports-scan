@@ -5,30 +5,37 @@ import (
 	"net"
 )
 
+type Ip struct {
+	a, b, c, d byte
+}
+
 type Ips struct {
-	ip net.IP
+	cursor net.IP
+	endIp net.IP
 }
 
 func (f *Ips) Next() (string, error) {
-	result := f.ip.String()
-	if f.ip.String() == "255.255.255.255" {
+	result := f.cursor.String()
+	if f.cursor.String() == f.endIp.String() {
 		return "", errors.New("all ips returned")
 	} else {
-		inc(f.ip)
+		f.cursor = IpIncrement(f.cursor, 1)
 	}
 
 	return result, nil
 }
-//  http://play.golang.org/p/m8TNTtygK0
-func inc(ip net.IP) {
-	for j := len(ip) - 1; j >= 0; j-- {
-		ip[j]++
-		if ip[j] > 0 {
-			break
-		}
-	}
+
+func Generator(startIp net.IP, endIp net.IP) (Ips, error) {
+	return Ips{startIp, endIp}, nil
 }
 
-func Generator(a, b, c, d byte) (Ips, error) {
-	return Ips{net.IPv4(a, b, c, d)}, nil
+func IpIncrement(ip net.IP, inc uint) net.IP {
+	i := ip.To4()
+	v := uint(i[0])<<24 + uint(i[1])<<16 + uint(i[2])<<8 + uint(i[3])
+	v += inc
+	v3 := byte(v & 0xFF)
+	v2 := byte((v >> 8) & 0xFF)
+	v1 := byte((v >> 16) & 0xFF)
+	v0 := byte((v >> 24) & 0xFF)
+	return net.IPv4(v0, v1, v2, v3)
 }
