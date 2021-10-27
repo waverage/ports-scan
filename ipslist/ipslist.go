@@ -1,33 +1,8 @@
 package ipslist
 
 import (
-	"errors"
 	"net"
 )
-
-type Ip struct {
-	a, b, c, d byte
-}
-
-type Ips struct {
-	cursor net.IP
-	endIp net.IP
-}
-
-func (f *Ips) Next() (string, error) {
-	result := f.cursor.String()
-	if f.cursor.String() == f.endIp.String() {
-		return "", errors.New("all ips returned")
-	} else {
-		f.cursor = IpIncrement(f.cursor, 1)
-	}
-
-	return result, nil
-}
-
-func Generator(startIp net.IP, endIp net.IP) (Ips, error) {
-	return Ips{startIp, endIp}, nil
-}
 
 func IpIncrement(ip net.IP, inc uint) net.IP {
 	i := ip.To4()

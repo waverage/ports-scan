@@ -18,8 +18,6 @@ var wg sync.WaitGroup
 var mg = db.Db{}
 
 func main() {
-	//var startIp = net.IPv4(18, 87, 91, 16)
-
 	err := mg.Connect()
 	if err != nil {
 		log.Fatal(err)
@@ -53,7 +51,6 @@ func main() {
 
 	wg.Wait()
 
-	log.Println("Start ip: ", ip.String())
 	log.Println("Workers has been initialized")
 }
 
@@ -67,7 +64,7 @@ func initWorker(ip net.IP, count uint) {
 		ip = ipslist.IpIncrement(ip, 1)
 
 		if counter % 100000 == 0 {
-			log.Println("Processed ", counter / 1000000, "mln ips")
+			log.Println("Processed ", counter / 1000000, "mln ips, ", ip.String())
 		}
 	}
 
