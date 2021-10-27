@@ -14,7 +14,7 @@ var counter uint64
 var wg sync.WaitGroup
 var mg = db.Db{}
 
-const useDb = false
+const useDb = true
 const totalIps = uint(256 * 256 * 256 * 256)
 
 var reservedNetworks []ipcore.NetworkRangeInt
@@ -31,7 +31,7 @@ func main() {
 
 	reservedNetworks = ipcore.GetReservedNetworks()
 
-	totalWorkers := uint(4096)
+	totalWorkers := uint(8192)
 	ipsPerWorker := uint(totalIps / totalWorkers)
 
 	log.Println("total ips: ", totalIps)

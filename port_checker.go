@@ -7,7 +7,7 @@ import (
 )
 
 func CheckPort(host string, port string) error {
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort(host, port), time.Second / 5)
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(host, port), time.Second / 10)
 	if err != nil {
 		return err
 	}
