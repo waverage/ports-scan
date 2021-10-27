@@ -1,78 +1,112 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"log"
 	"net"
 	"port/db"
-	"port/ipslist"
+	"port/ipcore"
 	"sync"
 	"sync/atomic"
-	"time"
 )
-
 
 var counter uint64
 var wg sync.WaitGroup
 var mg = db.Db{}
 
+const useDb = false
+const totalIps = uint(256 * 256 * 256 * 256)
+
+var reservedNetworks []ipcore.NetworkRangeInt
+
 func main() {
-	err := mg.Connect()
-	if err != nil {
-		log.Fatal(err)
+	if useDb {
+		err := mg.Connect()
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer mg.Disconnect()
+		fmt.Println("Database connected!")
 	}
-	defer mg.Disconnect()
 
-	fmt.Println("Database connected!")
+	reservedNetworks = ipcore.GetReservedNetworks()
 
-	totalIps := 255 * 255 * 255 * 255
-	totalWorkers := 16
+	totalWorkers := uint(4096)
 	ipsPerWorker := uint(totalIps / totalWorkers)
 
 	log.Println("total ips: ", totalIps)
 	log.Println("Ips per worker: ", ipsPerWorker)
 	ip := net.IPv4(0, 0, 0, 0)
 
+	processedIps := uint64(0)
 
-	for i := 0; i <= totalWorkers; i++ {
-		wg.Add(1)
+	wg.Add(int(totalWorkers))
 
+	for i := uint(1); i <= totalWorkers; i++ {
+		var inc uint
 		if i == totalWorkers {
-			ip = net.IPv4(255, 255, 255, 255)
+			// Fix last network range (divide error fix)
+			inc = uint(uint64(totalIps) - processedIps - 1)
+		} else {
+			inc = ipsPerWorker
 		}
-		//if i % 1000 == 0 {
-			log.Println("Start ip: ", ip.String())
-		//}
-		go initWorker(ip, ipsPerWorker)
 
-		ip = ipslist.IpIncrement(ip, ipsPerWorker)
+		endIp := ipcore.Increment(ip, inc)
+		log.Println("Worker", i, "network", ip.String(), "-", endIp.String())
+
+		go doWorker(ip, inc, i)
+
+		ip = ipcore.Increment(ip, ipsPerWorker)
+		processedIps += uint64(ipsPerWorker)
 	}
 
 	wg.Wait()
 
-	log.Println("Workers has been initialized")
+	log.Println("All workers has been initialized")
 }
 
-func initWorker(ip net.IP, count uint) {
+func doWorker(ip net.IP, count uint, index uint) {
 	defer wg.Done()
 
+	//log.Println("#", index, " initial ip:", ip.String())
+
 	for i := uint(0); i < count; i++ {
-		processPort(ip.String(), "80")
+		if ipcore.IpIsReserved(ip, reservedNetworks) {
+			// Skip reserved network
+			nToSkip := ipcore.GetNToEndOfReservedNetwork(ip, reservedNetworks)
+			if nToSkip > 0 {
+				newIp := ipcore.Increment(ip, uint(nToSkip))
+				log.Println("#", index, "Skip", nToSkip, " reserved ips", ", reserved ip:", ip.String(), ", end reserved network: ", newIp)
+				ip = newIp
+
+				if ip.String() == "0.0.0.0" {
+					log.Println("#", index, "group finished, because all ips are in reserved network")
+					return
+				}
+			}
+		}
+
+		processPort(ip, "80")
 		atomic.AddUint64(&counter, 1)
 
-		ip = ipslist.IpIncrement(ip, 1)
+		ip = ipcore.Increment(ip, 1)
 
 		if counter % 100000 == 0 {
-			log.Println("Processed ", counter / 1000000, "mln ips, ", ip.String())
+			log.Println("#", index, "Processed ", counter / 1000000, "mln ips, ", ip.String())
 		}
 	}
 
-	log.Println("Group finished, end:", ip.String())
+	log.Println("#", index, "Group finished, end:", ip.String())
 }
 
-func processPort(host, port string) {
-	err := checkPort(host, port)
+func processPort(host net.IP, port string) {
+	// Skip reserved ips
+	if ipcore.IpIsReserved(host, reservedNetworks) {
+		return
+	}
+
+	stringIp := host.String()
+	err := CheckPort(stringIp, port)
 
 	if err != nil {
 		if err.Error() != fmt.Sprintf("dial tcp %v:%v: i/o timeout", host, port) &&
@@ -82,20 +116,8 @@ func processPort(host, port string) {
 			log.Println(host, ":", port, "Received error: ", err)
 		}
 	} else {
-		mg.InsertRow(host, port)
+		if useDb {
+			mg.InsertRow(stringIp, port)
+		}
 	}
-}
-
-func checkPort(host string, port string) error {
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort(host, port), time.Second / 5)
-	if err != nil {
-		return err
-	}
-
-	if conn != nil {
-		conn.Close()
-		return nil
-	}
-
-	return errors.New("connection failed")
 }

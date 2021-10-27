@@ -53,7 +53,7 @@ func (db *Db) ListDbs() {
 
 func (db *Db) InsertRow(ip string, port string) {
 	_, err := db.ipsCollection.InsertOne(db.ctx, bson.D{
-		{Key: "ip", Value: ip},
+		{Key: "ipcore", Value: ip},
 		{Key: "port", Value: port},
 	})
 	if err != nil {
