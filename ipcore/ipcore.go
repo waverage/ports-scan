@@ -2,6 +2,7 @@ package ipcore
 
 import (
 	"encoding/binary"
+	"errors"
 	"net"
 )
 
@@ -53,7 +54,6 @@ var ReservedNetworks = []NetworkRangeIp{
 	{net.IPv4(198, 51, 100, 0), net.IPv4(198, 51, 100, 255)},
 	{net.IPv4(203, 0, 113, 0), net.IPv4(203, 0, 113, 255)},
 	{net.IPv4(224, 0, 0, 0), net.IPv4(239, 255, 255, 255)},
-	{net.IPv4(233, 252, 0, 0), net.IPv4(233, 252, 0, 255)},
 	{net.IPv4(240, 0, 0, 0), net.IPv4(255, 255, 255, 255)},
 }
 
@@ -70,6 +70,11 @@ func GetReservedNetworks() []NetworkRangeInt {
 func IpIsReserved(ip net.IP, reserved []NetworkRangeInt) bool {
 	intIp := Ip2int(ip)
 
+	allReservedAfter := Ip2int(net.IPv4(224, 0, 0, 0))
+	if intIp >= allReservedAfter {
+		return true
+	}
+
 	for _, network := range reserved {
 		if intIp >= network.a && intIp <= network.b {
 			return true
@@ -79,14 +84,43 @@ func IpIsReserved(ip net.IP, reserved []NetworkRangeInt) bool {
 	return false
 }
 
-func GetNToEndOfReservedNetwork(ip net.IP, reserved []NetworkRangeInt) uint32 {
+func GetNToEndOfReservedNetwork(ip net.IP, reserved []NetworkRangeInt) (error, uint32) {
 	intIp := Ip2int(ip)
+
+	allReservedAfter := Ip2int(net.IPv4(224, 0, 0, 0))
+	if intIp >= allReservedAfter {
+		return errors.New("do not have free ips after"), 0
+	}
 
 	for _, network := range reserved {
 		if intIp >= network.a && intIp <= network.b {
-			return (network.b - intIp) + 1
+			return nil, (network.b - intIp) + 1
 		}
 	}
 
-	return 0
+	return nil, 0
+}
+
+func SkipReserved(ip net.IP, limit uint, reserved []NetworkRangeInt) (error, net.IP, uint) {
+	skipped := uint(0)
+
+	for true {
+		if IpIsReserved(ip, reserved) {
+			err, skip := GetNToEndOfReservedNetwork(ip, reserved)
+			if err != nil {
+				return err, nil, 0
+			}
+
+			skipped += uint(skip)
+			if skipped >= limit || ip.String() == "0.0.0.0" {
+				return errors.New("all ips in network are reserved"), nil, 0
+			}
+
+			ip = Increment(ip, uint(skip))
+		} else {
+			break
+		}
+	}
+
+	return nil, ip, limit - skipped
 }

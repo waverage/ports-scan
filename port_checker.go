@@ -6,8 +6,8 @@ import (
 	"time"
 )
 
-func CheckPort(host string, port string) error {
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort(host, port), time.Second / 10)
+func CheckPort(host string, port string, timeout time.Duration) error {
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(host, port), timeout)
 	if err != nil {
 		return err
 	}

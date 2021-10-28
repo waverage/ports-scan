@@ -8,6 +8,7 @@ import (
 	"port/ipcore"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 var counter uint64
@@ -15,7 +16,10 @@ var wg sync.WaitGroup
 var mg = db.Db{}
 
 const useDb = true
-const totalIps = uint(256 * 256 * 256 * 256)
+const debug = false
+const ipsAfter224Ip = uint(536871169)
+const totalIps = uint(256 * 256 * 256 * 256 - ipsAfter224Ip)
+const timeout = time.Second / 2
 
 var reservedNetworks []ipcore.NetworkRangeInt
 
@@ -31,30 +35,46 @@ func main() {
 
 	reservedNetworks = ipcore.GetReservedNetworks()
 
-	totalWorkers := uint(8192)
+	totalWorkers := uint(18000)
 	ipsPerWorker := uint(totalIps / totalWorkers)
+	ip224Int := ipcore.Ip2int(net.IPv4(224, 0, 0, 0))
 
 	log.Println("total ips: ", totalIps)
 	log.Println("Ips per worker: ", ipsPerWorker)
 	ip := net.IPv4(0, 0, 0, 0)
+	allAfterReserved := ipcore.Ip2int(net.IPv4(224, 0, 0, 0))
 
 	processedIps := uint64(0)
 
 	wg.Add(int(totalWorkers))
 
 	for i := uint(1); i <= totalWorkers; i++ {
+		intIp := ipcore.Ip2int(ip)
+		if intIp >= allAfterReserved {
+			break
+		}
+
 		var inc uint
 		if i == totalWorkers {
-			// Fix last network range (divide error fix)
-			inc = uint(uint64(totalIps) - processedIps - 1)
+			inc = uint(ip224Int - intIp)
 		} else {
 			inc = ipsPerWorker
 		}
 
 		endIp := ipcore.Increment(ip, inc)
-		log.Println("Worker", i, "network", ip.String(), "-", endIp.String())
 
-		go doWorker(ip, inc, i)
+		if ipcore.IpIsReserved(ip, reservedNetworks) {
+			err, newIp, count := ipcore.SkipReserved(ip, inc, reservedNetworks)
+			if err != nil {
+				log.Println(i, "All ips in worker are reserved! network", ip.String(), "-", endIp.String())
+			} else {
+				log.Println("Reserved fix worker", i, "network", newIp.String(), "-", endIp.String())
+				go doWorker(newIp, count, i)
+			}
+		} else {
+			log.Println("Worker", i, "network", ip.String(), "-", endIp.String())
+			go doWorker(ip, inc, i)
+		}
 
 		ip = ipcore.Increment(ip, ipsPerWorker)
 		processedIps += uint64(ipsPerWorker)
@@ -73,7 +93,12 @@ func doWorker(ip net.IP, count uint, index uint) {
 	for i := uint(0); i < count; i++ {
 		if ipcore.IpIsReserved(ip, reservedNetworks) {
 			// Skip reserved network
-			nToSkip := ipcore.GetNToEndOfReservedNetwork(ip, reservedNetworks)
+			err, nToSkip := ipcore.GetNToEndOfReservedNetwork(ip, reservedNetworks)
+			if err != nil {
+				log.Println("#", index, "group finished, because all ips in reserved networks")
+				return
+			}
+
 			if nToSkip > 0 {
 				newIp := ipcore.Increment(ip, uint(nToSkip))
 				log.Println("#", index, "Skip", nToSkip, " reserved ips", ", reserved ip:", ip.String(), ", end reserved network: ", newIp)
@@ -100,20 +125,17 @@ func doWorker(ip net.IP, count uint, index uint) {
 }
 
 func processPort(host net.IP, port string) {
-	// Skip reserved ips
-	if ipcore.IpIsReserved(host, reservedNetworks) {
-		return
-	}
-
 	stringIp := host.String()
-	err := CheckPort(stringIp, port)
+	err := CheckPort(stringIp, port, timeout)
 
 	if err != nil {
-		if err.Error() != fmt.Sprintf("dial tcp %v:%v: i/o timeout", host, port) &&
-			err.Error() != fmt.Sprintf("dial tcp %v:%v: connect: network is unreachable", host, port) &&
-			err.Error() != fmt.Sprintf("dial tcp %v:%v: connect: no route to host", host, port) &&
-		    err.Error() != fmt.Sprintf("dial tcp %v:%v: connect: connection refused", host, port) {
-			log.Println(host, ":", port, "Received error: ", err)
+		if debug {
+			if err.Error() != fmt.Sprintf("dial tcp %v:%v: i/o timeout", host, port) &&
+				err.Error() != fmt.Sprintf("dial tcp %v:%v: connect: network is unreachable", host, port) &&
+				err.Error() != fmt.Sprintf("dial tcp %v:%v: connect: no route to host", host, port) &&
+				err.Error() != fmt.Sprintf("dial tcp %v:%v: connect: connection refused", host, port) {
+				log.Println(host, ":", port, "Received error: ", err)
+			}
 		}
 	} else {
 		if useDb {
